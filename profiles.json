@@ -1,0 +1,28 @@
+[
+  {
+    "name": "운영 리눅스 결제 API 배포 (SSH Remote JAR)",
+    "deployType": "jar",
+    "targetFileName": "payment-service.jar",
+    "deployPath": "/var/www/payment-service",
+    "backupPath": "/var/www/backup",
+    "restartScriptPath": "/var/www/payment-service/restart.sh",
+    "sshEnabled": true,
+    "sshHost": "10.200.8.196",
+    "sshUser": "clovir",
+    "sshCredentialsId": "jenkins-ssh-key-prod",
+    "onlyDeployIfRunning": true
+  },
+  {
+    "name": "스테이징 톰캣 원격 배포 (SSH Remote WAR)",
+    "deployType": "war",
+    "targetFileName": "api-gateway.war",
+    "deployPath": "/opt/tomcat/webapps",
+    "backupPath": "/opt/tomcat/backups",
+    "restartScriptPath": "/opt/tomcat/bin/startup.sh",
+    "sshEnabled": true,
+    "sshHost": "10.200.12.95",
+    "sshUser": "tomcat-admin",
+    "sshCredentialsId": "jenkins-ssh-key-staging",
+    "onlyDeployIfRunning": true
+  }
+]

@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Jenkins Build & Deployment Evaluator</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="glass-bg"></div>
+  
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="logo">
+        <i class="fa-brands fa-jenkins jenkins-icon animate-pulse"></i>
+        <div>
+          <h1>Jenkins Build & Deploy Evaluator</h1>
+          <p class="subtitle">젠킨스 빌드 및 배포 기능 평가 대시보드</p>
+        </div>
+      </div>
+
+      <!-- Tab Navigation -->
+      <nav class="header-nav">
+        <button class="nav-tab active" data-target="console-tab">
+          <i class="fa-solid fa-desktop"></i> 배포 콘솔
+        </button>
+        <button class="nav-tab" data-target="servers-tab">
+          <i class="fa-solid fa-server"></i> 서버 인프라 관리 <span class="tab-badge" id="servers-count">0</span>
+        </button>
+        <button class="nav-tab" data-target="ssh-tab">
+          <i class="fa-solid fa-terminal" style="color: var(--color-emerald);"></i> SSH 터미널
+        </button>
+      </nav>
+
+      <div class="system-status">
+        <div class="status-pill active" id="sys-mode-pill">
+          <span class="pulse-dot"></span>
+          <span id="sys-mode-text">SIMULATION MODE</span>
+        </div>
+        <div class="status-pill">
+          <i class="fa-solid fa-server"></i>
+          <span>Local Engine: v1.0.0</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Tab Content: Console -->
+    <div id="console-tab" class="tab-content active">
+      <!-- Main Grid -->
+      <main class="dashboard-grid">
+      
+      <!-- Left Column: Config & Rollback -->
+      <section class="left-column">
+        <!-- Configuration Card -->
+        <div class="glass-card config-card">
+          <div class="card-header">
+            <i class="fa-solid fa-sliders text-cyan"></i>
+            <h2>Pipeline Configuration</h2>
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-detect-process" style="margin-left: auto; padding: 0.35rem 0.75rem; font-size: 0.8rem;">
+              <i class="fa-solid fa-wand-magic-sparkles text-cyan"></i> 실행 앱 감지
+            </button>
+          </div>
+          
+          <!-- Process Detection List Overlay -->
+          <div class="process-detect-overlay hidden" id="process-detect-overlay">
+            <div class="process-detect-header">
+              <span><i class="fa-solid fa-circle-nodes text-cyan"></i> 실행 중인 Java 프로세스</span>
+              <button type="button" class="btn-close-overlay" id="btn-close-detect"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="process-detect-body" id="process-detect-list">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+
+          <form id="deploy-form" enctype="multipart/form-data">
+            
+            <!-- Profile Manager Row -->
+            <div class="profile-manager-container">
+              <label class="form-group-label"><i class="fa-solid fa-folder-open text-cyan"></i> 배포 프로필 선택 (Deployment Profile)</label>
+              <div class="profile-actions-row">
+                <select id="profileSelect" class="form-select profile-select-field">
+                  <!-- Dynamically loaded -->
+                </select>
+                <div class="profile-buttons">
+                  <button type="button" class="btn btn-secondary btn-sm" id="btn-save-profile" title="현재 설정을 프로필에 저장"><i class="fa-solid fa-floppy-disk"></i> 저장</button>
+                  <button type="button" class="btn btn-secondary btn-sm" id="btn-add-profile" title="새 프로필 추가"><i class="fa-solid fa-plus"></i> 추가</button>
+                  <button type="button" class="btn btn-secondary btn-sm" id="btn-delete-profile" title="현재 프로필 삭제" style="color: var(--color-crimson); border-color: rgba(244, 63, 94, 0.25);"><i class="fa-solid fa-trash-can"></i> 삭제</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="toggle-group">
+              <label class="toggle-label">실행 모드 (Execution Mode)</label>
+              <div class="mode-selector">
+                <input type="radio" id="mode-simulated" name="executionMode" value="simulated" checked>
+                <label for="mode-simulated" class="mode-btn"><i class="fa-solid fa-microchip"></i> 시뮬레이션</label>
+                
+                <input type="radio" id="mode-real" name="executionMode" value="real">
+                <label for="mode-real" class="mode-btn"><i class="fa-solid fa-bolt"></i> 실제 로컬 실행</label>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="deployType">배포 유형 (Deployment Type)</label>
+              <select id="deployType" name="deployType" class="form-select">
+                <option value="jar" selected>JAR (내장 WAS / Stand-alone)</option>
+                <option value="war">WAR (외장 Tomcat webapps)</option>
+              </select>
+              <span class="input-tip">WAR 선택 시 톰캣 인스턴스 정지, webapps 내 압축해제(Exploded) 디렉터리 정리 및 자동 언팩 관리가 포함됩니다.</span>
+            </div>
+
+            <div class="form-grid">
+              <div class="form-group">
+                <label for="targetFileName">대상 파일명 (Artifact Name)</label>
+                <input type="text" id="targetFileName" name="targetFileName" value="app.jar" placeholder="예: app.jar 또는 root.war" required>
+              </div>
+              
+              <div class="form-group">
+                <label for="appFile">WAR / JAR 업로드</label>
+                <div class="file-upload-wrapper">
+                  <input type="file" id="appFile" name="appFile" accept=".war,.jar">
+                  <div class="file-upload-btn">
+                    <i class="fa-solid fa-cloud-arrow-up"></i>
+                    <span id="file-chosen-text">파일 선택 (WAR, JAR)</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="deployPath">배포 경로 (Deployment Path)</label>
+              <input type="text" id="deployPath" name="deployPath" value="C:\temp\deploy" placeholder="배포될 디렉터리 경로" required>
+              <span class="input-tip">애플리케이션 파일이 최종 교체되어 저장되는 경로입니다.</span>
+            </div>
+
+            <div class="form-group">
+              <label for="backupPath">백업 경로 (Backup Path)</label>
+              <input type="text" id="backupPath" name="backupPath" value="C:\temp\backup" placeholder="백업 디렉터리 경로" required>
+              <span class="input-tip">교체 전 기존 파일이 타임스탬프와 함께 보관되는 경로입니다.</span>
+            </div>
+
+            <div class="form-group">
+              <label for="restartScriptPath">재기동 스크립트 경로 (Restart Script Path)</label>
+              <input type="text" id="restartScriptPath" name="restartScriptPath" value="C:\temp\deploy\restart.bat" placeholder="예: C:\temp\deploy\restart.bat 또는 restart.sh" required>
+              <span class="input-tip">배포 완료 후 앱을 재기동하기 위한 스크립트 파일의 경로입니다.</span>
+            </div>
+
+            <!-- SSH Remote Deployment Sub-section -->
+            <div class="ssh-config-section">
+              <div class="ssh-toggle-wrapper">
+                <input type="checkbox" id="sshEnabled" name="sshEnabled">
+                <label for="sshEnabled" class="checkbox-label">
+                  <i class="fa-solid fa-server text-cyan"></i> SSH 원격 Linux 서버 배포 사용 (SSH Remote Deploy)
+                </label>
+              </div>
+
+              <div id="ssh-fields" class="ssh-fields hidden">
+                <div class="form-grid">
+                  <div class="form-group">
+                    <label for="sshHost">원격 서버 IP / 호스트</label>
+                    <input type="text" id="sshHost" name="sshHost" value="192.168.1.120" placeholder="예: 192.168.1.120">
+                  </div>
+                  <div class="form-group">
+                    <label for="sshUser">SSH 접속 사용자명</label>
+                    <input type="text" id="sshUser" name="sshUser" value="deploy" placeholder="예: deploy 또는 root">
+                  </div>
+                </div>
+
+                <div class="form-grid">
+                  <div class="form-group">
+                    <label for="sshCredentialsId">Jenkins Credentials ID</label>
+                    <input type="text" id="sshCredentialsId" name="sshCredentialsId" value="ssh-prod-key" placeholder="예: ssh-prod-key">
+                  </div>
+                  <div class="form-group" style="display: flex; align-items: center; margin-top: 1.2rem;">
+                    <input type="checkbox" id="onlyDeployIfRunning" name="onlyDeployIfRunning" checked>
+                    <label for="onlyDeployIfRunning" style="margin-left: 0.5rem; font-size: 0.8rem; font-weight: 500; cursor: pointer; color: var(--text-muted);">
+                      기동 중인 서비스만 업로드 허용
+                    </label>
+                  </div>
+                </div>
+                <span class="input-tip" style="margin-top: -0.5rem; margin-bottom: 0.8rem;">원격지 서버의 Java 프로세스가 살아있을 때만 파일 전송 및 배포를 승인합니다.</span>
+
+                <!-- Explicit SSH Credentials Inputs -->
+                <div class="form-grid" style="border-top: 1px dashed rgba(255,255,255,0.05); padding-top: 1rem; margin-top: 0.5rem;">
+                  <div class="form-group">
+                    <label for="sshPassword">SSH 비밀번호 (Password - 선택)</label>
+                    <input type="password" id="sshPassword" name="sshPassword" placeholder="비밀번호 입력" style="width: 100%; padding: 0.75rem 1rem; background: rgba(0, 0, 0, 0.2); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; color: var(--text-main); font-size: 0.92rem;">
+                  </div>
+                  <div class="form-group">
+                    <label for="sshPrivateKey">SSH 비밀키 내용 (Private Key PEM - 선택)</label>
+                    <textarea id="sshPrivateKey" name="sshPrivateKey" placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;..." rows="3" style="width: 100%; padding: 0.75rem 1rem; background: rgba(0, 0, 0, 0.2); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; color: var(--text-main); font-family: var(--font-mono); font-size: 0.78rem; resize: vertical;"></textarea>
+                  </div>
+                </div>
+                <span class="input-tip" style="margin-top: -0.5rem; margin-bottom: 1rem;">비밀번호와 비밀키를 모두 비워두면 로컬 PC의 기본 SSH Key (~/.ssh/id_rsa 등)를 사용하여 접속을 시도합니다.</span>
+
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-test-ssh-connection" style="width: 100%; margin-bottom: 1rem; padding: 0.6rem 1rem;">
+                  <i class="fa-solid fa-plug text-cyan"></i> SSH 연결 테스트 (Test Connection)
+                </button>
+              </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary" id="btn-deploy">
+              <i class="fa-solid fa-play"></i> Pipeline 실행 (Build & Deploy)
+            </button>
+          </form>
+        </div>
+
+        <!-- Backups / Rollback Card -->
+        <div class="glass-card backup-card">
+          <div class="card-header">
+            <i class="fa-solid fa-history text-amber"></i>
+            <h2>Backup & Rollback Manager</h2>
+            <button class="btn btn-icon" id="btn-refresh-backups" title="새로고침">
+              <i class="fa-solid fa-rotate"></i>
+            </button>
+          </div>
+          
+          <div class="backup-list-wrapper">
+            <table class="backup-table">
+              <thead>
+                <tr>
+                  <th>백업 파일명</th>
+                  <th>크기</th>
+                  <th>백업 시점</th>
+                  <th>작업</th>
+                </tr>
+              </thead>
+              <tbody id="backup-list-body">
+                <tr>
+                  <td colspan="4" class="empty-message">배포 이력이 없거나 백업 경로를 조회할 수 없습니다.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Column: Visualizer, Terminal, Jenkinsfile -->
+      <section class="right-column">
+        <!-- Pipeline Progress -->
+        <div class="glass-card pipeline-card">
+          <div class="card-header">
+            <i class="fa-solid fa-diagram-project text-emerald"></i>
+            <h2>Pipeline Visualizer</h2>
+            <div class="timer" id="pipeline-timer">Elapsed: 00.0s</div>
+          </div>
+          
+          <div class="pipeline-track">
+            <div class="pipeline-progress-bar" id="pipeline-progress-bar"></div>
+            
+            <div class="pipeline-step" id="step-build">
+              <div class="step-icon"><i class="fa-solid fa-hammer"></i></div>
+              <div class="step-info">
+                <span class="step-name">1. Build / Upload</span>
+                <span class="step-status">Waiting</span>
+              </div>
+            </div>
+            
+            <div class="pipeline-step" id="step-backup">
+              <div class="step-icon"><i class="fa-solid fa-box-archive"></i></div>
+              <div class="step-info">
+                <span class="step-name">2. Backup File</span>
+                <span class="step-status">Waiting</span>
+              </div>
+            </div>
+            
+            <div class="pipeline-step" id="step-deploy">
+              <div class="step-icon"><i class="fa-solid fa-file-export"></i></div>
+              <div class="step-info">
+                <span class="step-name">3. Replace File</span>
+                <span class="step-status">Waiting</span>
+              </div>
+            </div>
+            
+            <div class="pipeline-step" id="step-restart">
+              <div class="step-icon"><i class="fa-solid fa-power-off"></i></div>
+              <div class="step-info">
+                <span class="step-name">4. Restart Script</span>
+                <span class="step-status">Waiting</span>
+              </div>
+            </div>
+            
+            <div class="pipeline-step" id="step-health">
+              <div class="step-icon"><i class="fa-solid fa-heart-pulse"></i></div>
+              <div class="step-info">
+                <span class="step-name">5. Health Check</span>
+                <span class="step-status">Waiting</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Terminal Console -->
+        <div class="glass-card terminal-card">
+          <div class="card-header terminal-header">
+            <div class="terminal-dots">
+              <span class="dot red"></span>
+              <span class="dot yellow"></span>
+              <span class="dot green"></span>
+            </div>
+            <span class="terminal-title">Jenkins Live Execution Terminal</span>
+            <div class="terminal-actions">
+              <button class="btn btn-icon-small" id="btn-clear-terminal" title="터미널 비우기">
+                <i class="fa-solid fa-trash-can"></i>
+              </button>
+              <button class="btn btn-icon-small" id="btn-copy-terminal" title="로그 복사">
+                <i class="fa-solid fa-copy"></i>
+              </button>
+            </div>
+          </div>
+          <div class="terminal-body" id="terminal-body">
+            <div class="terminal-welcome">
+              [SYSTEM] Ready to deploy. Configure options and click "Pipeline 실행".
+              [SYSTEM] Simulated mode runs safely without writing local files.
+            </div>
+          </div>
+        </div>
+
+        <!-- Jenkinsfile Code Generator -->
+        <div class="glass-card jenkinsfile-card">
+          <div class="card-header">
+            <div class="title-with-icon">
+              <i class="fa-brands fa-jenkins text-blue"></i>
+              <h2>Generated Jenkinsfile (Declarative Pipeline)</h2>
+            </div>
+            <button class="btn btn-secondary btn-sm" id="btn-copy-jenkinsfile">
+              <i class="fa-solid fa-copy"></i> Copy Jenkinsfile
+            </button>
+          </div>
+          <div class="jenkinsfile-container">
+            <pre><code id="jenkinsfile-code" class="language-groovy">pipeline {
+    agent any
+
+    environment {
+        // Dynamic environment variables based on config
+        DEPLOY_DIR  = 'C:\\temp\\deploy'
+        BACKUP_DIR  = 'C:\\temp\\backup'
+        TARGET_FILE = 'app.jar'
+        SCRIPT_PATH = 'C:\\temp\\deploy\\restart.bat'
+    }
+
+    stages {
+        ...
+    }
+}</code></pre>
+          </div>
+        </div>
+      </section>
+      
+    </main>
+    </div> <!-- End of console-tab -->
+
+    <!-- Tab Content: Servers -->
+    <div id="servers-tab" class="tab-content hidden">
+      <div class="servers-dashboard">
+        <div class="dashboard-section-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; border-bottom: 1px solid var(--card-border); padding-bottom: 1rem;">
+          <div class="section-title-group" style="display: flex; align-items: center; gap: 1rem;">
+            <i class="fa-solid fa-server text-cyan" style="font-size: 1.8rem;"></i>
+            <div>
+              <h2 style="font-size: 1.5rem; font-weight: 600;">서버 인프라 관리 (Infrastructure Management)</h2>
+              <p class="section-subtitle" style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.2rem;">배포 대상 서버들의 기동 및 가용 상태를 실시간으로 모니터링하고 프로필을 편집합니다.</p>
+            </div>
+          </div>
+          <div class="header-actions" style="display: flex; gap: 0.8rem;">
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-refresh-all-status">
+              <i class="fa-solid fa-arrows-rotate"></i> 전체 상태 갱신
+            </button>
+            <button type="button" class="btn btn-primary btn-sm" id="btn-create-server">
+              <i class="fa-solid fa-plus"></i> 새 서버 추가
+            </button>
+          </div>
+        </div>
+        
+        <!-- Servers Grid -->
+        <div class="servers-grid" id="servers-grid">
+          <!-- Dynamically populated server cards -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab Content: SSH Terminal -->
+    <div id="ssh-tab" class="tab-content hidden">
+      <div class="ssh-terminal-dashboard">
+        <div class="dashboard-section-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; border-bottom: 1px solid var(--card-border); padding-bottom: 1rem;">
+          <div class="section-title-group" style="display: flex; align-items: center; gap: 1rem;">
+            <i class="fa-solid fa-terminal" style="font-size: 1.8rem; color: var(--color-emerald);"></i>
+            <div>
+              <h2 style="font-size: 1.5rem; font-weight: 600;">SSH 원격 터미널 (SSH Remote Terminal)</h2>
+              <p class="section-subtitle" style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.2rem;">원격 서버 프로필에 연결하여 직접 쉘 명령어를 수행하고 결과를 검증할 수 있는 유틸리티 터미널입니다.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="ssh-terminal-layout" style="display: grid; grid-template-columns: 1fr 2.5fr; gap: 1.8rem; align-items: start;">
+          <!-- Left Configuration Card -->
+          <div class="glass-card ssh-conn-card" style="padding: 1.5rem;">
+            <h3 style="font-size: 1.1rem; margin-bottom: 1.2rem; display: flex; align-items: center; gap: 0.5rem; color: var(--text-main);"><i class="fa-solid fa-plug text-cyan"></i> SSH 연결 구성</h3>
+            
+            <div class="form-group">
+              <label for="ssh-terminal-profile-select">대상 서버 선택</label>
+              <select id="ssh-terminal-profile-select" class="form-select">
+                <!-- SSH enabled profiles dynamically loaded -->
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="ssh-terminal-password">비밀번호 (Password Authentication)</label>
+              <input type="password" id="ssh-terminal-password" placeholder="비밀번호 입력 (필요시)" style="width: 100%; padding: 0.75rem 1rem; background: rgba(0, 0, 0, 0.2); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; color: var(--text-main); font-size: 0.9rem;">
+            </div>
+
+            <div class="form-group">
+              <label for="ssh-terminal-pkey">비밀키 내용 (Private Key PEM)</label>
+              <textarea id="ssh-terminal-pkey" placeholder="-----BEGIN RSA PRIVATE KEY-----\n..." rows="5" style="width: 100%; padding: 0.75rem 1rem; background: rgba(0, 0, 0, 0.2); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; color: var(--text-main); font-family: var(--font-mono); font-size: 0.78rem; resize: vertical;"></textarea>
+            </div>
+
+            <button type="button" class="btn btn-primary" id="btn-ssh-terminal-connect" style="width: 100%; margin-top: 0.5rem;">
+              <i class="fa-solid fa-link"></i> SSH 세션 연결
+            </button>
+          </div>
+
+          <!-- Right Terminal Console Card -->
+          <div class="glass-card terminal-card" style="padding: 0; min-height: 520px; display: flex; flex-direction: column;">
+            <div class="card-header terminal-header" style="border-radius: 16px 16px 0 0;">
+              <div class="terminal-dots">
+                <span class="dot red"></span>
+                <span class="dot yellow"></span>
+                <span class="dot green"></span>
+              </div>
+              <span class="terminal-title" id="ssh-terminal-header-title">SSH Terminal Console (Disconnected)</span>
+              <div class="terminal-actions">
+                <button class="btn btn-icon-small" id="btn-clear-ssh-terminal" title="터미널 비우기">
+                  <i class="fa-solid fa-trash-can"></i>
+                </button>
+              </div>
+            </div>
+            
+            <div class="terminal-body" id="ssh-terminal-body" style="flex-grow: 1; min-height: 400px; max-height: 480px; overflow-y: auto; background: var(--terminal-bg); color: var(--terminal-text); font-family: var(--font-mono); padding: 1.2rem; font-size: 0.88rem; line-height: 1.5; border-bottom: 1px solid rgba(255, 255, 255, 0.05);">
+              <div class="terminal-welcome" style="color: var(--text-muted);">
+                [SYSTEM] SSH Terminal Utility. Select an SSH Remote Profile and click "SSH 세션 연결" to connect.
+                [SYSTEM] Supported simulated commands: ls, pwd, cd, whoami, uname, free, df, cat, docker, top, etc.
+              </div>
+            </div>
+
+            <div class="ssh-terminal-input-row" style="display: flex; align-items: center; padding: 0.8rem 1.2rem; background: rgba(0, 0, 0, 0.3); border-radius: 0 0 16px 16px;">
+              <span class="ssh-terminal-prompt" id="ssh-terminal-prompt" style="color: var(--color-cyan); font-family: var(--font-mono); font-weight: 600; white-space: nowrap; margin-right: 0.5rem; font-size: 0.88rem;">user@localhost:~$</span>
+              <input type="text" id="ssh-terminal-input" placeholder="명령어를 입력해 주십시오..." disabled style="flex-grow: 1; background: transparent; border: none; outline: none; color: var(--text-main); font-family: var(--font-mono); font-size: 0.88rem;">
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div> <!-- End of app-container -->
+
+  <!-- Server Profile Modal -->
+  <div class="modal-overlay hidden" id="profile-modal">
+    <div class="glass-card modal-card">
+      <div class="modal-header">
+        <h2><i class="fa-solid fa-server text-cyan"></i> <span id="modal-title">서버 프로필 수정</span></h2>
+        <button type="button" class="btn-close-overlay" id="btn-close-modal"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <form id="profile-modal-form">
+        <input type="hidden" id="modal-profile-index" value="">
+        
+        <div class="form-group">
+          <label for="modal-name">프로필 이름 (Profile Name)</label>
+          <input type="text" id="modal-name" placeholder="예: 스테이징 톰캣 원격 배포" required>
+        </div>
+
+        <div class="form-group">
+          <label for="modal-deployType">배포 유형 (Deployment Type)</label>
+          <select id="modal-deployType" class="form-select" required>
+            <option value="jar">JAR (내장 WAS / Stand-alone)</option>
+            <option value="war">WAR (외장 Tomcat webapps)</option>
+          </select>
+        </div>
+
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="modal-targetFileName">대상 파일명 (Artifact Name)</label>
+            <input type="text" id="modal-targetFileName" placeholder="예: app.jar 또는 ROOT.war" required>
+          </div>
+          
+          <div class="form-group" style="display: flex; align-items: center; margin-top: 1.2rem;">
+            <input type="checkbox" id="modal-onlyDeployIfRunning" style="margin-right: 0.5rem; width: auto; cursor: pointer;">
+            <label for="modal-onlyDeployIfRunning" style="font-size: 0.85rem; cursor: pointer; color: var(--text-muted); margin-bottom: 0;">
+              기동 중인 서비스만 업로드 허용
+            </label>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="modal-deployPath">배포 경로 (Deployment Path)</label>
+          <input type="text" id="modal-deployPath" placeholder="배포될 디렉터리 경로" required>
+        </div>
+
+        <div class="form-group">
+          <label for="modal-backupPath">백업 경로 (Backup Path)</label>
+          <input type="text" id="modal-backupPath" placeholder="백업 디렉터리 경로" required>
+        </div>
+
+        <div class="form-group">
+          <label for="modal-restartScriptPath">재기동 스크립트 경로 (Restart Script Path)</label>
+          <input type="text" id="modal-restartScriptPath" placeholder="예: C:\deploy\restart.bat 또는 /opt/restart.sh" required>
+        </div>
+
+        <!-- SSH Config Sub-section -->
+        <div class="ssh-config-section">
+          <div class="ssh-toggle-wrapper">
+            <input type="checkbox" id="modal-sshEnabled">
+            <label for="modal-sshEnabled" class="checkbox-label" style="cursor: pointer; font-size: 0.9rem; font-weight: 500;">
+              <i class="fa-solid fa-network-wired text-cyan"></i> SSH 원격 Linux 서버 배포 사용 (SSH Remote Deploy)
+            </label>
+          </div>
+
+          <div id="modal-ssh-fields" class="ssh-fields hidden" style="margin-top: 1rem;">
+            <div class="form-grid">
+              <div class="form-group">
+                <label for="modal-sshHost">원격 서버 IP / 호스트</label>
+                <input type="text" id="modal-sshHost" placeholder="예: 10.200.12.95">
+              </div>
+              <div class="form-group">
+                <label for="modal-sshUser">SSH 접속 사용자명</label>
+                <input type="text" id="modal-sshUser" placeholder="예: tomcat-admin">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="modal-sshCredentialsId">Jenkins Credentials ID</label>
+              <input type="text" id="modal-sshCredentialsId" placeholder="예: jenkins-ssh-key-prod">
+            </div>
+
+            <!-- Explicit SSH Credentials Inputs in Modal -->
+            <div class="form-grid" style="border-top: 1px dashed rgba(255,255,255,0.05); padding-top: 1rem; margin-top: 0.5rem;">
+              <div class="form-group">
+                <label for="modal-sshPassword">SSH 비밀번호 (Password - 선택)</label>
+                <input type="password" id="modal-sshPassword" placeholder="비밀번호 입력" style="width: 100%; padding: 0.75rem 1rem; background: rgba(0, 0, 0, 0.2); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; color: var(--text-main); font-size: 0.92rem;">
+              </div>
+              <div class="form-group">
+                <label for="modal-sshPrivateKey">SSH 비밀키 내용 (Private Key PEM - 선택)</label>
+                <textarea id="modal-sshPrivateKey" placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;..." rows="3" style="width: 100%; padding: 0.75rem 1rem; background: rgba(0, 0, 0, 0.2); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; color: var(--text-main); font-family: var(--font-mono); font-size: 0.78rem; resize: vertical;"></textarea>
+              </div>
+            </div>
+            <span class="input-tip" style="margin-top: -0.5rem; margin-bottom: 1rem;">비밀번호와 비밀키를 모두 비워두면 로컬 PC의 기본 SSH Key를 사용합니다.</span>
+
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-modal-test-ssh" style="width: 100%; margin-bottom: 1rem; padding: 0.6rem 1rem;">
+              <i class="fa-solid fa-plug text-cyan"></i> SSH 연결 테스트 (Test Connection)
+            </button>
+          </div>
+        </div>
+
+        <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 1.8rem; border-top: 1px solid var(--card-border); padding-top: 1.2rem;">
+          <button type="button" class="btn btn-secondary btn-sm" id="btn-cancel-modal" style="padding: 0.5rem 1.2rem;">취소</button>
+          <button type="submit" class="btn btn-primary btn-sm" id="btn-submit-modal" style="padding: 0.5rem 1.2rem;">저장</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Notification Center -->
+  <div class="notification-container" id="notification-container"></div>
+  
+  <script src="app.js"></script>
+</body>
+</html>
