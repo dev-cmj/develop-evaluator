@@ -1,16 +1,18 @@
 [
   {
     "name": "운영 리눅스 결제 API 배포 (SSH Remote JAR)",
-    "deployType": "jar",
-    "targetFileName": "payment-service.jar",
-    "deployPath": "/var/www/payment-service",
+    "deployType": "war",
+    "targetFileName": "clovir-admin.war",
+    "deployPath": "/var/lib/tomcat/webapps",
     "backupPath": "/var/www/backup",
-    "restartScriptPath": "/var/www/payment-service/restart.sh",
+    "restartScriptPath": "/var/lib/tomcat/bin/startup.sh",
     "sshEnabled": true,
     "sshHost": "10.200.8.196",
     "sshUser": "clovir",
     "sshCredentialsId": "jenkins-ssh-key-prod",
-    "onlyDeployIfRunning": true
+    "onlyDeployIfRunning": true,
+    "sshPassword": "VMware1!",
+    "sshPrivateKey": ""
   },
   {
     "name": "스테이징 톰캣 원격 배포 (SSH Remote WAR)",

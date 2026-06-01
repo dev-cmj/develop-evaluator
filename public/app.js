@@ -683,16 +683,11 @@ document.addEventListener('DOMContentLoaded', () => {
       
       // Auto-detect deploy type based on file ext
       const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
-      const isSsh = sshEnabled.checked;
       
       if (ext === '.war') {
         inputDeployType.value = 'war';
-        inputDeployPath.value = isSsh ? '/opt/tomcat/webapps' : 'C:\\apache-tomcat\\webapps';
-        inputRestartScriptPath.value = isSsh ? '/opt/tomcat/bin/startup.sh' : 'C:\\apache-tomcat\\bin\\startup.bat';
       } else if (ext === '.jar') {
         inputDeployType.value = 'jar';
-        inputDeployPath.value = isSsh ? '/var/www/deploy' : 'C:\\temp\\deploy';
-        inputRestartScriptPath.value = isSsh ? '/var/www/deploy/restart.sh' : 'C:\\temp\\deploy\\restart.bat';
       }
 
       inputTargetFileName.value = file.name;
@@ -732,7 +727,21 @@ document.addEventListener('DOMContentLoaded', () => {
     processDetectOverlay.classList.remove('hidden');
 
     try {
-      const response = await fetch(`/api/detect-processes?isSimulated=${modeSimulated.checked}`);
+      const response = await fetch('/api/detect-processes', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          isSimulated: modeSimulated.checked,
+          sshEnabled: sshEnabled.checked,
+          sshHost: inputSshHost.value,
+          sshUser: inputSshUser.value,
+          sshPassword: inputSshPassword.value,
+          sshPrivateKey: inputSshPrivateKey.value
+        })
+      });
+
       if (!response.ok) throw new Error('프로세스 감지 실패');
       
       const data = await response.json();
@@ -748,7 +757,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderDetectedProcesses(processes) {
     if (processes.length === 0) {
-      processDetectList.innerHTML = '<div style="text-align:center; padding:1.5rem; color:var(--text-dark); font-style:italic;">현재 기동 중인 Java 프로세스가 없습니다. (로컬에 Java 프로세스를 띄운 뒤 시도해 보십시오)</div>';
+      const isSsh = sshEnabled.checked;
+      const remoteMsg = isSsh ? ' (원격 서버 및 로컬 모두 검색 결과 없음)' : ' (로컬에 Java 프로세스를 띄운 뒤 시도해 보십시오)';
+      processDetectList.innerHTML = `<div style="text-align:center; padding:1.5rem; color:var(--text-dark); font-style:italic;">현재 기동 중인 Java 프로세스가 없습니다.${remoteMsg}</div>`;
       return;
     }
 
@@ -759,16 +770,21 @@ document.addEventListener('DOMContentLoaded', () => {
       
       const badgeClass = proc.type === 'war' ? 'tomcat' : 'jar';
       const label = proc.type === 'war' ? 'Tomcat' : 'JAR App';
+      const locationBadge = proc.isRemote ? '<span class="process-type-badge" style="background:rgba(6, 182, 212, 0.15); color:var(--color-cyan); margin-left:0.4rem;"><i class="fa-solid fa-cloud"></i> 원격</span>' : '<span class="process-type-badge" style="background:rgba(255, 255, 255, 0.05); color:var(--text-muted); margin-left:0.4rem;"><i class="fa-solid fa-laptop"></i> 로컬</span>';
       const displayName = proc.targetFile || (proc.type === 'war' ? 'Catalina (webapps)' : 'Java Application');
+      const locationLabel = proc.isRemote ? '원격' : '로컬';
 
       item.innerHTML = `
         <div class="process-item-meta">
           <span class="process-pid">PID: ${proc.pid} ${proc.isMock ? '(시뮬레이션)' : ''}</span>
-          <span class="process-type-badge ${badgeClass}">${label}</span>
+          <div>
+            <span class="process-type-badge ${badgeClass}">${label}</span>
+            ${locationBadge}
+          </div>
         </div>
         <div class="process-command" title="${proc.command}">${proc.command}</div>
         <div class="process-detected-path">
-          <i class="fa-solid fa-folder-open"></i> 배포 감지 경로: <strong>${proc.deployPath}</strong>
+          <i class="fa-solid fa-folder-open"></i> ${locationLabel} 감지 경로: <strong>${proc.deployPath}</strong>
         </div>
       `;
 
@@ -779,10 +795,19 @@ document.addEventListener('DOMContentLoaded', () => {
         inputDeployPath.value = proc.deployPath;
         
         // Formulate restart script path
-        if (proc.type === 'war') {
-          inputRestartScriptPath.value = proc.deployPath.replace('webapps', 'bin\\startup.bat');
+        const isRemoteProcess = proc.isRemote === true;
+        if (isRemoteProcess) {
+          if (proc.type === 'war') {
+            inputRestartScriptPath.value = proc.deployPath.replace('webapps', 'bin/startup.sh');
+          } else {
+            inputRestartScriptPath.value = proc.deployPath === '/' ? '/restart.sh' : `${proc.deployPath}/restart.sh`;
+          }
         } else {
-          inputRestartScriptPath.value = `${proc.deployPath}\\restart.bat`;
+          if (proc.type === 'war') {
+            inputRestartScriptPath.value = proc.deployPath.replace('webapps', 'bin\\startup.bat');
+          } else {
+            inputRestartScriptPath.value = `${proc.deployPath}\\restart.bat`;
+          }
         }
 
         processDetectOverlay.classList.add('hidden');

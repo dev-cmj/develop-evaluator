@@ -1000,11 +1000,127 @@ function parseUnixJavaCmd(pid, command) {
   return null;
 }
 
+function parseRemoteUnixJavaCmd(pid, command) {
+  if (!command) return null;
+
+  // 1. Check Tomcat
+  const tomcatBaseMatch = command.match(/-Dcatalina\.base="?([^"\s]+)"?/i);
+  if (tomcatBaseMatch) {
+    const tomcatBase = tomcatBaseMatch[1];
+    return {
+      pid,
+      command,
+      type: 'war',
+      deployPath: tomcatBase + '/webapps',
+      targetFile: 'ROOT.war',
+      isMock: false,
+      isRemote: true
+    };
+  }
+
+  // 2. Check Standalone JAR
+  const jarMatch = command.match(/-jar\s+"?([^"]+\.jar)"?/i);
+  if (jarMatch) {
+    const jarPath = jarMatch[1];
+    const lastSlash = jarPath.lastIndexOf('/');
+    const deployPath = lastSlash === -1 ? '.' : jarPath.substring(0, lastSlash);
+    const targetFile = lastSlash === -1 ? jarPath : jarPath.substring(lastSlash + 1);
+    return {
+      pid,
+      command,
+      type: 'jar',
+      deployPath,
+      targetFile,
+      isMock: false,
+      isRemote: true
+    };
+  }
+
+  return null;
+}
+
+async function detectRemoteSshProcesses(cfg) {
+  const { Client } = require('ssh2');
+  const os = require('os');
+
+  return new Promise((resolve, reject) => {
+    const connConfig = {
+      host: cfg.sshHost,
+      port: 22,
+      username: cfg.sshUser,
+      readyTimeout: 10000
+    };
+
+    if (cfg.sshPrivateKey) {
+      connConfig.privateKey = cfg.sshPrivateKey;
+    } else if (cfg.sshPassword) {
+      connConfig.password = cfg.sshPassword;
+    } else {
+      const homedir = os.homedir();
+      const keyPaths = [
+        path.join(homedir, '.ssh', 'id_rsa'),
+        path.join(homedir, '.ssh', 'id_ed25519')
+      ];
+      let privateKeyContent = null;
+      for (const keyPath of keyPaths) {
+        if (fs.existsSync(keyPath)) {
+          try {
+            privateKeyContent = fs.readFileSync(keyPath, 'utf8');
+            break;
+          } catch (readErr) {
+            // ignore
+          }
+        }
+      }
+      if (privateKeyContent) {
+        connConfig.privateKey = privateKeyContent;
+      } else {
+        return reject(new Error('No SSH credentials found.'));
+      }
+    }
+
+    const conn = new Client();
+    conn.on('ready', async () => {
+      try {
+        const cmd = 'ps -eo pid,command | grep java || true';
+        const stdout = await runSshCommandHelper(conn, cmd);
+        conn.end();
+
+        const detected = [];
+        if (stdout && stdout.trim()) {
+          const lines = stdout.split('\n');
+          lines.forEach(line => {
+            const parts = line.trim().split(/\s+/);
+            if (parts.length < 2) return;
+            const pid = parseInt(parts[0], 10);
+            const command = parts.slice(1).join(' ');
+
+            if (command.includes('grep java')) return;
+
+            const parsed = parseRemoteUnixJavaCmd(pid, command);
+            if (parsed) detected.push(parsed);
+          });
+        }
+        resolve(detected);
+      } catch (err) {
+        conn.end();
+        reject(err);
+      }
+    });
+
+    conn.on('error', (err) => {
+      reject(err);
+    });
+
+    conn.connect(connConfig);
+  });
+}
+
 /**
  * API: Detect running java processes and extract deployment configurations
  */
-app.get('/api/detect-processes', (req, res) => {
-  const isSimulated = req.query.isSimulated === 'true';
+app.post('/api/detect-processes', async (req, res) => {
+  const { isSimulated, sshEnabled, sshHost, sshUser, sshPassword, sshPrivateKey } = req.body;
 
   const mockProcesses = [
     {
@@ -1013,7 +1129,8 @@ app.get('/api/detect-processes', (req, res) => {
       type: 'jar',
       deployPath: 'C:\\services\\order-api',
       targetFile: 'order-api.jar',
-      isMock: true
+      isMock: true,
+      isRemote: false
     },
     {
       pid: 10482,
@@ -1021,7 +1138,123 @@ app.get('/api/detect-processes', (req, res) => {
       type: 'war',
       deployPath: 'C:\\apache-tomcat\\webapps',
       targetFile: 'ROOT.war',
-      isMock: true
+      isMock: true,
+      isRemote: false
+    }
+  ];
+
+  const mockSshProcesses = [
+    {
+      pid: 32014,
+      command: 'java -jar /var/www/deploy/app.jar --server.port=8080',
+      type: 'jar',
+      deployPath: '/var/www/deploy',
+      targetFile: 'app.jar',
+      isMock: true,
+      isRemote: true
+    },
+    {
+      pid: 15902,
+      command: 'java -Dcatalina.home="/opt/tomcat" -Dcatalina.base="/opt/tomcat" org.apache.catalina.startup.Bootstrap start',
+      type: 'war',
+      deployPath: '/opt/tomcat/webapps',
+      targetFile: 'ROOT.war',
+      isMock: true,
+      isRemote: true
+    }
+  ];
+
+  if (isSimulated) {
+    if (sshEnabled) {
+      return res.json({ processes: mockSshProcesses });
+    }
+    return res.json({ processes: mockProcesses });
+  }
+
+  const detected = [];
+  try {
+    // 1. Detect local processes first
+    await new Promise((resolve) => {
+      if (process.platform === 'win32') {
+        const cmd = `powershell -Command "Get-CimInstance Win32_Process -Filter \\"name='java.exe' or name='javaw.exe'\\" | Select-Object -Property ProcessId, CommandLine | ConvertTo-Json"`;
+        exec(cmd, (err, stdout, stderr) => {
+          if (err || !stdout.trim()) {
+            return resolve();
+          }
+          try {
+            let data = JSON.parse(stdout);
+            if (!Array.isArray(data)) {
+              data = [data];
+            }
+            data.forEach(proc => {
+              if (!proc || !proc.CommandLine) return;
+              const parsed = parseWindowsJavaCmd(proc.ProcessId, proc.CommandLine);
+              if (parsed) detected.push(parsed);
+            });
+          } catch (e) {}
+          resolve();
+        });
+      } else {
+        const cmd = `ps -eo pid,command | grep java || true`;
+        exec(cmd, (err, stdout, stderr) => {
+          if (err || !stdout.trim()) {
+            return resolve();
+          }
+          try {
+            const lines = stdout.split('\n');
+            lines.forEach(line => {
+              const parts = line.trim().split(/\s+/);
+              if (parts.length < 2) return;
+              const pid = parseInt(parts[0], 10);
+              const command = parts.slice(1).join(' ');
+              if (command.includes('grep java')) return;
+              const parsed = parseUnixJavaCmd(pid, command);
+              if (parsed) detected.push(parsed);
+            });
+          } catch (e) {}
+          resolve();
+        });
+      }
+    });
+
+    // 2. Fallback to SSH Remote if local list is empty and SSH is enabled
+    if (detected.length === 0 && sshEnabled) {
+      const remoteProcesses = await detectRemoteSshProcesses({
+        sshHost,
+        sshUser,
+        sshPassword,
+        sshPrivateKey
+      });
+      return res.json({ processes: remoteProcesses });
+    }
+
+    res.json({ processes: detected });
+  } catch (err) {
+    console.error('Process detection failed:', err.message);
+    res.json({ processes: [] });
+  }
+});
+
+app.get('/api/detect-processes', (req, res) => {
+  const isSimulated = req.query.isSimulated === 'true';
+  const mockProcesses = [
+    {
+      pid: 24901,
+      command: 'java -jar C:\\services\\order-api\\order-api.jar --server.port=8081',
+      type: 'jar',
+      deployPath: 'C:\\services\\order-api',
+      targetFile: 'order-api.jar',
+      isMock: true,
+      isRemote: false
+    },
+    {
+      pid: 10482,
+      command: 'java -Dcatalina.home="C:\\apache-tomcat" -Dcatalina.base="C:\\apache-tomcat" org.apache.catalina.startup.Bootstrap start',
+      type: 'war',
+      deployPath: 'C:\\apache-tomcat\\webapps',
+      targetFile: 'ROOT.war',
+      isMock: true,
+      isRemote: false
     }
   ];
 
@@ -1029,42 +1262,35 @@ app.get('/api/detect-processes', (req, res) => {
     return res.json({ processes: mockProcesses });
   }
 
+  // Local-only detection for GET compatibility
   const detected = [];
-  console.log(process.platform);
-
   if (process.platform === 'win32') {
     const cmd = `powershell -Command "Get-CimInstance Win32_Process -Filter \\"name='java.exe' or name='javaw.exe'\\" | Select-Object -Property ProcessId, CommandLine | ConvertTo-Json"`;
-
     exec(cmd, (err, stdout, stderr) => {
       if (err || !stdout.trim()) {
         return res.json({ processes: [] });
       }
-
       try {
         let data = JSON.parse(stdout);
         if (!Array.isArray(data)) {
           data = [data];
         }
-
         data.forEach(proc => {
           if (!proc || !proc.CommandLine) return;
           const parsed = parseWindowsJavaCmd(proc.ProcessId, proc.CommandLine);
           if (parsed) detected.push(parsed);
         });
-
         res.json({ processes: detected });
-      } catch (parseErr) {
+      } catch (e) {
         res.json({ processes: [] });
       }
     });
   } else {
-    // Linux/macOS
-    const cmd = `ps -eo pid,command | grep java`;
+    const cmd = `ps -eo pid,command | grep java || true`;
     exec(cmd, (err, stdout, stderr) => {
       if (err || !stdout.trim()) {
         return res.json({ processes: [] });
       }
-
       try {
         const lines = stdout.split('\n');
         lines.forEach(line => {
@@ -1072,15 +1298,12 @@ app.get('/api/detect-processes', (req, res) => {
           if (parts.length < 2) return;
           const pid = parseInt(parts[0], 10);
           const command = parts.slice(1).join(' ');
-
           if (command.includes('grep java')) return;
-
           const parsed = parseUnixJavaCmd(pid, command);
           if (parsed) detected.push(parsed);
         });
-
         res.json({ processes: detected });
-      } catch (parseErr) {
+      } catch (e) {
         res.json({ processes: [] });
       }
     });
